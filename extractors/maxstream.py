@@ -164,12 +164,26 @@ class MaxstreamExtractor:
     async def _get_uprot_playwright(self, link: str) -> str:
         """Use Playwright (real browser) to bypass Cloudflare on uprot.net."""
         from playwright.async_api import async_playwright
+        from urllib.parse import urlparse
+        
+        parsed = urlparse(link)
+        domain = parsed.netloc
+        
+        # Resolve real IP via DoH to bypass local DNS hijacking
+        real_ips = await self._resolve_doh(domain)
+        
+        chrome_args = ["--no-sandbox", "--disable-setuid-sandbox", "--disable-gpu"]
+        if real_ips:
+            # Force Chromium to use real IP instead of hijacked DNS
+            ip = real_ips[0]
+            chrome_args.append(f"--host-resolver-rules=MAP {domain} {ip}")
+            logger.info(f"Playwright: forcing {domain} -> {ip} via host-resolver-rules")
         
         logger.info(f"Playwright: loading uprot page {link}")
         async with async_playwright() as pw:
             browser = await pw.chromium.launch(
                 headless=True,
-                args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-gpu"],
+                args=chrome_args,
             )
             try:
                 context = await browser.new_context(
